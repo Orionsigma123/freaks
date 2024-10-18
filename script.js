@@ -15,11 +15,10 @@ const inventory = [];
 // Constants for Perlin noise and chunk generation
 let blockSize = 1;
 const chunkSize = 16; // Each chunk is 16x16 blocks
-let renderDistance = 16; // Default render distance in chunks (adjustable by slider)
 const noiseScale = 0.1;
 const simplex = new SimplexNoise();
+
 let chunks = {}; // Store generated chunks
-let chunksToGenerate = []; // Chunks queued for generation
 
 // Function to create a block
 function createBlock(x, y, z, texture) {
@@ -52,52 +51,11 @@ function generateChunk(cx, cz) {
     chunks[chunkKey] = blocks; // Save generated blocks in the chunk
 }
 
-// Batch chunk generation
-function generateChunksInBatches() {
-    const maxChunksPerFrame = 5; // Limit the number of chunks generated per frame to avoid lag
-
-    for (let i = 0; i < maxChunksPerFrame; i++) {
-        if (chunksToGenerate.length === 0) break; // If no more chunks to generate, exit
-        const [cx, cz] = chunksToGenerate.shift();
-        generateChunk(cx, cz);
-    }
-}
-
-// Function to generate chunks in a circular area around the player
-function enqueueChunksAroundPlayer() {
+// Only generate the chunk the player is in
+function generateChunksAroundPlayer() {
     const playerChunkX = Math.floor(camera.position.x / (chunkSize * blockSize));
     const playerChunkZ = Math.floor(camera.position.z / (chunkSize * blockSize));
-
-    // Queue chunks within the render distance radius
-    for (let x = -renderDistance; x <= renderDistance; x++) {
-        for (let z = -renderDistance; z <= renderDistance; z++) {
-            const distance = Math.sqrt(x * x + z * z); // Calculate the distance from the player
-            if (distance <= renderDistance) {
-                const chunkKey = `${playerChunkX + x},${playerChunkZ + z}`;
-                if (!chunks[chunkKey]) {
-                    chunksToGenerate.push([playerChunkX + x, playerChunkZ + z]); // Enqueue chunk for generation
-                }
-            }
-        }
-    }
-}
-
-// Function to remove distant chunks
-function removeDistantChunks() {
-    const playerChunkX = Math.floor(camera.position.x / (chunkSize * blockSize));
-    const playerChunkZ = Math.floor(camera.position.z / (chunkSize * blockSize));
-
-    for (let key in chunks) {
-        const [cx, cz] = key.split(',').map(Number);
-        const distX = Math.abs(cx - playerChunkX);
-        const distZ = Math.abs(cz - playerChunkZ);
-
-        // Remove chunks that are outside the render distance radius
-        if (Math.sqrt(distX * distX + distZ * distZ) > renderDistance + 1) {
-            chunks[key].forEach(block => scene.remove(block));
-            delete chunks[key];
-        }
-    }
+    generateChunk(playerChunkX, playerChunkZ);
 }
 
 // Position the camera
@@ -141,9 +99,8 @@ function updatePlayer() {
     camera.position.z += direction.z * -velocity.z;
     camera.position.y += velocity.y;
 
-    // Enqueue new chunks around the player and remove distant chunks
-    enqueueChunksAroundPlayer();
-    removeDistantChunks();
+    // Generate only the current chunk
+    generateChunksAroundPlayer();
 }
 
 // Window resize event
@@ -155,31 +112,23 @@ window.addEventListener('resize', () => {
     camera.updateProjectionMatrix();
 });
 
-// Render distance slider event
-const renderDistanceInput = document.getElementById('renderDistance');
-const renderDistanceValue = document.getElementById('renderDistanceValue');
-
-renderDistanceInput.addEventListener('input', (event) => {
-    renderDistance = parseInt(event.target.value);
-    renderDistanceValue.textContent = renderDistance; // Update the displayed value
-    regenerateWorld(); // Regenerate the world based on new render distance
+// Mouse lock for camera control
+document.body.addEventListener('click', () => {
+    document.body.requestPointerLock();
 });
 
-// Function to regenerate the world based on the render distance
-function regenerateWorld() {
-    // Clear existing blocks
-    while (scene.children.length) {
-        scene.remove(scene.children[0]); // Clear all objects in the scene
+document.addEventListener('mousemove', (event) => {
+    if (document.pointerLockElement) {
+        camera.rotation.y -= event.movementX * 0.002;
+        camera.rotation.x -= event.movementY * 0.002;
+        camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x)); // Clamp vertical rotation
     }
-    chunks = {}; // Reset the chunks
-    enqueueChunksAroundPlayer(); // Generate new chunks based on the updated render distance
-}
+});
 
 // Animation loop
 function animate() {
     requestAnimationFrame(animate);
     updatePlayer();
-    generateChunksInBatches(); // Generate chunks in batches to prevent lag
     renderer.render(scene, camera);
 }
 
