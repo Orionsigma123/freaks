@@ -1,149 +1,251 @@
+// Setup basic scene, camera, and renderer
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({ alpha: true });
+const renderer = new THREE.WebGLRenderer({ alpha: true }); // Enable alpha for transparency
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
+// Set the background color of the scene
 renderer.setClearColor(0x87CEEB, 1); // Sky blue color
 
 // Textures
-const grassTexture = new THREE.TextureLoader().load('textures/grass.png');
+const grassTexture = new THREE.TextureLoader().load('textures/grass.png'); // Replace with your grass texture path 
 
 // Inventory
 const inventory = [];
 
-// Constants for Perlin noise and chunk generation
-let blockSize = 1;
-const chunkSize = 16; // Each chunk is 16x16 blocks
-const chunkRadius = 12; // Number of chunks to generate around the player
-const noiseScale = 0.1;
-const simplex = new SimplexNoise();
+// Object to store world data
+const worlds = {};
 
-let chunks = {}; // Store generated chunks
+// Generate a simple block world using Perlin noise
+let blockSize = 1;
+let renderDistance = 16; // Initial render distance
+const worldWidth = 64; // Increased world size
+const worldHeight = 64; // Increased world size
+const noiseScale = 0.1; // Adjust for terrain smoothness
+const simplex = new SimplexNoise();
 
 // Function to create a block
 function createBlock(x, y, z, texture) {
     const geometry = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
-    const material = new THREE.MeshBasicMaterial({ map: texture });
+    const material = new THREE.MeshBasicMaterial({ map: texture }); // Use the specified texture
     const block = new THREE.Mesh(geometry, material);
     block.position.set(x * blockSize, y * blockSize, z * blockSize);
     scene.add(block);
-    return block;
 }
 
-// Function to generate a chunk based on the chunk coordinates (cx, cz)
-function generateChunk(cx, cz) {
-    const chunkKey = `${cx},${cz}`;
-    if (chunks[chunkKey]) return; // Chunk already generated
-
-    const blocks = [];
-    for (let x = 0; x < chunkSize; x++) {
-        for (let z = 0; z < chunkSize; z++) {
-            const worldX = cx * chunkSize + x;
-            const worldZ = cz * chunkSize + z;
-            const height = Math.floor(simplex.noise2D(worldX * noiseScale, worldZ * noiseScale) * 5);
-
+// Function to generate the world
+function generateWorld() {
+    for (let x = -renderDistance; x <= renderDistance; x++) {
+        for (let z = -renderDistance; z <= renderDistance; z++) {
+            const height = Math.floor(simplex.noise2D(x * noiseScale, z * noiseScale) * 5);
             for (let y = 0; y <= height; y++) {
-                const block = createBlock(worldX, y, worldZ, grassTexture);
-                blocks.push(block); // Store block in this chunk
+                createBlock(x, y, z, grassTexture); // Use grass texture for blocks
             }
         }
     }
-    chunks[chunkKey] = blocks; // Save generated blocks in the chunk
 }
 
-// Function to generate chunks around the player
-function generateChunksAroundPlayer() {
-    const playerChunkX = Math.floor(camera.position.x / (chunkSize * blockSize));
-    const playerChunkZ = Math.floor(camera.position.z / (chunkSize * blockSize));
+// Function to save the current world
+function saveWorld(name) {
+    if (!name) {
+        document.getElementById('message').textContent = "Please enter a world name.";
+        return;
+    }
 
-    // Generate chunks in a radius around the player
-    for (let x = -chunkRadius; x <= chunkRadius; x++) {
-        for (let z = -chunkRadius; z <= chunkRadius; z++) {
-            generateChunk(playerChunkX + x, playerChunkZ + z);
+    const worldData = []; // Array to hold the block data
+    for (const block of scene.children) {
+        if (block instanceof THREE.Mesh) {
+            worldData.push({
+                position: block.position.toArray(), // Save the position of each block
+                texture: block.material.map.image.src // Save the texture path
+            });
         }
     }
+    
+    worlds[name] = worldData; // Save the world data under the specified name
+    document.getElementById('message').textContent = `World '${name}' saved!`;
 }
 
-// Function to remove distant chunks
-function removeDistantChunks() {
-    const playerChunkX = Math.floor(camera.position.x / (chunkSize * blockSize));
-    const playerChunkZ = Math.floor(camera.position.z / (chunkSize * blockSize));
-
-    for (let key in chunks) {
-        const [cx, cz] = key.split(',').map(Number);
-        const distX = Math.abs(cx - playerChunkX);
-        const distZ = Math.abs(cz - playerChunkZ);
-
-        // Remove chunks that are too far from the player
-        if (distX > chunkRadius + 1 || distZ > chunkRadius + 1) {
-            chunks[key].forEach(block => scene.remove(block));
-            delete chunks[key];
-        }
+// Function to load a saved world
+function loadWorld(name) {
+    if (!worlds[name]) {
+        document.getElementById('message').textContent = `World '${name}' does not exist.`;
+        return;
     }
+
+    // Clear existing blocks
+    while (scene.children.length) {
+        scene.remove(scene.children[0]);
+    }
+
+    // Generate the world from saved data
+    worlds[name].forEach(blockData => {
+        const { position, texture } = blockData;
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.load(texture, (loadedTexture) => {
+            createBlock(position[0], position[1], position[2], loadedTexture);
+        });
+    });
+    
+    document.getElementById('message').textContent = `World '${name}' loaded!`;
 }
 
-// Position the camera
-camera.position.set(25, 0.4, 25);
+// Initial call to generate the world
+generateWorld();
 
-// Player controls and movement logic
+// Position the camera to be just above the ground
+camera.position.set(25, 1.5, 25); // Adjust height to be just above the blocks
+
+// Player controls
 const playerSpeed = 0.1;
+const jumpForce = 0.2; // Jumping force
 let velocity = new THREE.Vector3(0, 0, 0);
 let isJumping = false;
 const keys = {};
+let mousePressed = false;
+let selectedBlock = null;
 
-// Handle key events
-window.addEventListener('keydown', (event) => keys[event.code] = true);
-window.addEventListener('keyup', (event) => keys[event.code] = false);
-
-function updatePlayer() {
-    velocity.set(0, 0, 0);
-
-    if (keys['KeyS']) velocity.z = playerSpeed; // Move backward
-    if (keys['KeyW']) velocity.z = -playerSpeed; // Move forward
-    if (keys['KeyA']) velocity.x = -playerSpeed; // Move left
-    if (keys['KeyD']) velocity.x = playerSpeed; // Move right
-    if (keys['Space'] && !isJumping) {
-        isJumping = true;
-        velocity.y = 0.3; // Jump force
-    }
-
-    if (camera.position.y > 2) velocity.y -= 0.1; // Apply gravity
-    else {
-        isJumping = false;
-        camera.position.y = 2;
-        velocity.y = 0;
-    }
-
-    const direction = new THREE.Vector3();
-    camera.getWorldDirection(direction);
-    direction.y = 0;
-    direction.normalize();
-
-    camera.position.x += direction.x * -velocity.z;
-    camera.position.z += direction.z * -velocity.z;
-    camera.position.y += velocity.y;
-
-    // Generate new chunks around the player and remove distant chunks
-    generateChunksAroundPlayer();
-    removeDistantChunks();
-}
-
-// Window resize event
-window.addEventListener('resize', () => {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    renderer.setSize(width, height);
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
+window.addEventListener('keydown', (event) => {
+    keys[event.code] = true;
+});
+window.addEventListener('keyup', (event) => {
+    keys[event.code] = false;
 });
 
-// Animation loop
+// Handle left mouse button down event
+window.addEventListener('mousedown', (event) => {
+    if (event.button === 0) { // Left mouse button
+        mousePressed = true;
+        selectedBlock = getBlockUnderCursor(); // Get the block under the cursor
+    }
+});
+
+// Handle left mouse button up event
+window.addEventListener('mouseup', (event) => {
+    if (event.button === 0) { // Left mouse button
+        mousePressed = false;
+        if (selectedBlock) {
+            // Add block to inventory and remove from scene
+            inventory.push(selectedBlock.material.map); // Store the texture or block type
+            scene.remove(selectedBlock); // Remove the block from the scene
+            selectedBlock = null; // Reset selected block
+        }
+    }
+});
+
+// Function to get the block under the cursor
+function getBlockUnderCursor() {
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(scene.children);
+
+    return intersects.length > 0 ? intersects[0].object : null; // Return the block if intersected
+}
+
+// Function to lock the mouse pointer
+function lockPointer() {
+    document.body.requestPointerLock();
+}
+
+// Lock the pointer on mouse click
+document.body.addEventListener('click', lockPointer);
+
+// Mouse movement for looking around
+let pitch = 0; // Up and down rotation (X-axis)
+let yaw = 0; // Left and right rotation (Y-axis)
+const lookSensitivity = 0.1; // Sensitivity for vertical look
+
+// Adjust the camera rotation logic to lock the Z-axis (roll)
+document.addEventListener('mousemove', (event) => {
+    if (document.pointerLockElement) {
+        yaw -= event.movementX * lookSensitivity; // Left/right
+        pitch -= event.movementY * lookSensitivity; // Up/down
+
+        // Clamp pitch to prevent flipping (X-axis rotation between -90° and 90°)
+        pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
+
+        // Apply camera rotation using Euler angles (yaw for left/right, pitch for up/down)
+        camera.rotation.order = "YXZ"; // Yaw (Y) first, then pitch (X)
+        camera.rotation.set(pitch, yaw, 0); // Keep Z-axis (roll) locked at 0
+    }
+});
+
+// Handle movement
+function updatePlayer() {
+    velocity.set(0, 0, 0); // Reset velocity
+
+    if (keys['KeyS']) { // Move backward (S)
+        velocity.z = playerSpeed; // Move forward
+    } else if (keys['KeyW']) { // Move forward (W)
+        velocity.z = -playerSpeed; // Move backward
+    }
+
+    if (keys['KeyA']) { // Move left
+        velocity.x = -playerSpeed;
+    } else if (keys['KeyD']) { // Move right
+        velocity.x = playerSpeed;
+    }
+
+    // Jumping logic
+    if (keys['Space'] && !isJumping) {
+        isJumping = true;
+        velocity.y = jumpForce; // Initial jump velocity
+    }
+
+    // Apply gravity
+    if (camera.position.y > 1.5) {
+        velocity.y -= 0.01; // Gravity effect
+    } else {
+        isJumping = false; // Reset jumping when hitting the ground
+        camera.position.y = 1.5; // Ensure the camera stays above ground
+        velocity.y = 0; // Reset vertical velocity when on the ground
+    }
+
+    // Move the camera based on the direction it's facing
+    const direction = new THREE.Vector3();
+    camera.getWorldDirection(direction); // Get the direction the camera is facing
+    direction.y = 0; // Ignore vertical direction for horizontal movement
+    direction.normalize(); // Normalize direction to ensure consistent speed
+
+    // Update camera position based on direction
+    camera.position.x += direction.x * -velocity.z; // Reverse movement for forward
+    camera.position.z += direction.z * -velocity.z; // Reverse movement for forward
+    camera.position.y += velocity.y; // Update vertical position
+
+    // Collision detection to prevent phasing through blocks
+    camera.position.x = Math.max(0, Math.min(camera.position.x, worldWidth - 1)); // Constrain camera within bounds
+    camera.position.z = Math.max(0, Math.min(camera.position.z, worldHeight - 1));
+
+    // Check collision with ground (simple method)
+    const groundHeight = Math.floor(simplex.noise2D(camera.position.x * noiseScale, camera.position.z * noiseScale) * 5); // Check height at camera position
+    if (camera.position.y < groundHeight + 1.5) {
+        camera.position.y = groundHeight + 1.5; // Prevent falling below ground
+        isJumping = false; // Reset jumping
+    }
+}
+
+// Handle render loop
 function animate() {
     requestAnimationFrame(animate);
-    updatePlayer();
+    updatePlayer(); // Call player update each frame
     renderer.render(scene, camera);
 }
+
+// Event listeners for saving and loading worlds
+document.getElementById('saveWorldButton').addEventListener('click', () => {
+    const worldName = document.getElementById('worldName').value; // Get world name from input
+    saveWorld(worldName); // Save the world
+});
+
+document.getElementById('loadWorldButton').addEventListener('click', () => {
+    const worldName = document.getElementById('worldName').value; // Get world name from input
+    loadWorld(worldName); // Load the world
+});
 
 // Start the animation loop
 animate();
