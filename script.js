@@ -45,7 +45,7 @@ function generateChunk(cx, cz) {
                 ];
 
                 // Define the vertices and faces for each visible side
-                neighbors.forEach((neighbor, index) => {
+                neighbors.forEach((neighbor) => {
                     const nx = worldX + neighbor.dx;
                     const ny = y + neighbor.dy;
                     const nz = worldZ + neighbor.dz;
@@ -107,10 +107,69 @@ function generateChunksAroundPlayer() {
 // Position the camera
 camera.position.set(25, 0.4, 25);
 
+// Player controls
+const playerSpeed = 0.1;
+let isJumping = false;
+const keys = {};
+
+window.addEventListener('keydown', (event) => {
+    keys[event.code] = true;
+});
+window.addEventListener('keyup', (event) => {
+    keys[event.code] = false;
+});
+
+// Function to handle player movement
+function updatePlayer() {
+    // Calculate the target height based on the ground height
+    const playerChunkX = Math.floor(camera.position.x / chunkSize);
+    const playerChunkZ = Math.floor(camera.position.z / chunkSize);
+    const groundHeight = Math.floor(simplex.noise2D(camera.position.x * noiseScale, camera.position.z * noiseScale) * 5);
+
+    // Update camera's vertical position to stay on top of the ground
+    if (camera.position.y > groundHeight + 2) {
+        camera.position.y -= 0.1; // Simple gravity effect
+        isJumping = true;
+    } else {
+        camera.position.y = groundHeight + 2; // Ensure the camera stays at the correct height
+        isJumping = false; // Reset jumping when hitting the ground
+    }
+
+    // Handle horizontal movement
+    const direction = new THREE.Vector3();
+    camera.getWorldDirection(direction); // Get the direction the camera is facing
+    direction.y = 0; // Ignore vertical direction for horizontal movement
+    direction.normalize(); // Normalize direction to ensure consistent speed
+
+    if (keys['KeyW']) {
+        camera.position.x += direction.x * playerSpeed;
+        camera.position.z += direction.z * playerSpeed;
+    } 
+    if (keys['KeyS']) {
+        camera.position.x -= direction.x * playerSpeed;
+        camera.position.z -= direction.z * playerSpeed;
+    } 
+    if (keys['KeyA']) {
+        camera.position.x -= direction.z * playerSpeed; // Move left
+        camera.position.z += direction.x * playerSpeed; // Move left
+    } 
+    if (keys['KeyD']) {
+        camera.position.x += direction.z * playerSpeed; // Move right
+        camera.position.z -= direction.x * playerSpeed; // Move right
+    }
+
+    // Jumping logic
+    if (keys['Space'] && !isJumping) {
+        camera.position.y += 0.5; // Simple jump effect
+        isJumping = true;
+    }
+}
+
 // Animation loop
 function animate() {
     requestAnimationFrame(animate);
-    generateChunksAroundPlayer(); // Generate chunks each frame (consider limiting this)
+    generateChunksAroundPlayer(); // Generate chunks around the player
+    updatePlayer(); // Update player movement
     renderer.render(scene, camera);
 }
 
