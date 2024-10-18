@@ -14,8 +14,8 @@ const inventory = [];
 
 // Constants for Perlin noise and chunk generation
 let blockSize = 1;
-const chunkSize = 16; // Each chunk is 16x16 blocks
-let renderDistance = 16; // Default render distance in chunks (adjustable by slider)
+const chunkSize =  10; // Each chunk is 16x16 blocks
+let renderDistance = 10; // Default render distance in chunks (adjustable by slider)
 const noiseScale = 0.1;
 const simplex = new SimplexNoise();
 
