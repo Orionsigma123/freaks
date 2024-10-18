@@ -14,12 +14,12 @@ const inventory = [];
 
 // Constants for Perlin noise and chunk generation
 let blockSize = 1;
-const chunkSize =  10; // Each chunk is 16x16 blocks
-let renderDistance = 10; // Default render distance in chunks (adjustable by slider)
+const chunkSize = 16; // Each chunk is 16x16 blocks
+let renderDistance = 16; // Default render distance in chunks (adjustable by slider)
 const noiseScale = 0.1;
 const simplex = new SimplexNoise();
-
 let chunks = {}; // Store generated chunks
+let chunksToGenerate = []; // Chunks queued for generation
 
 // Function to create a block
 function createBlock(x, y, z, texture) {
@@ -52,17 +52,31 @@ function generateChunk(cx, cz) {
     chunks[chunkKey] = blocks; // Save generated blocks in the chunk
 }
 
+// Batch chunk generation
+function generateChunksInBatches() {
+    const maxChunksPerFrame = 5; // Limit the number of chunks generated per frame to avoid lag
+
+    for (let i = 0; i < maxChunksPerFrame; i++) {
+        if (chunksToGenerate.length === 0) break; // If no more chunks to generate, exit
+        const [cx, cz] = chunksToGenerate.shift();
+        generateChunk(cx, cz);
+    }
+}
+
 // Function to generate chunks in a circular area around the player
-function generateChunksAroundPlayer() {
+function enqueueChunksAroundPlayer() {
     const playerChunkX = Math.floor(camera.position.x / (chunkSize * blockSize));
     const playerChunkZ = Math.floor(camera.position.z / (chunkSize * blockSize));
 
-    // Generate chunks within the render distance radius
+    // Queue chunks within the render distance radius
     for (let x = -renderDistance; x <= renderDistance; x++) {
         for (let z = -renderDistance; z <= renderDistance; z++) {
             const distance = Math.sqrt(x * x + z * z); // Calculate the distance from the player
             if (distance <= renderDistance) {
-                generateChunk(playerChunkX + x, playerChunkZ + z); // Only generate chunks within the render distance
+                const chunkKey = `${playerChunkX + x},${playerChunkZ + z}`;
+                if (!chunks[chunkKey]) {
+                    chunksToGenerate.push([playerChunkX + x, playerChunkZ + z]); // Enqueue chunk for generation
+                }
             }
         }
     }
@@ -127,8 +141,8 @@ function updatePlayer() {
     camera.position.z += direction.z * -velocity.z;
     camera.position.y += velocity.y;
 
-    // Generate new chunks around the player and remove distant chunks
-    generateChunksAroundPlayer();
+    // Enqueue new chunks around the player and remove distant chunks
+    enqueueChunksAroundPlayer();
     removeDistantChunks();
 }
 
@@ -158,13 +172,14 @@ function regenerateWorld() {
         scene.remove(scene.children[0]); // Clear all objects in the scene
     }
     chunks = {}; // Reset the chunks
-    generateChunksAroundPlayer(); // Generate new chunks based on the updated render distance
+    enqueueChunksAroundPlayer(); // Generate new chunks based on the updated render distance
 }
 
 // Animation loop
 function animate() {
     requestAnimationFrame(animate);
     updatePlayer();
+    generateChunksInBatches(); // Generate chunks in batches to prevent lag
     renderer.render(scene, camera);
 }
 
