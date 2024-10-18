@@ -14,7 +14,8 @@ const inventory = [];
 
 // Constants for Perlin noise and chunk generation
 let blockSize = 1;
-const chunkSize = 16; // Each chunk is 16x16 blocks
+const chunkSize = 16; // 16x16 blocks per chunk
+const renderDistanceChunks = 10; // Render distance in chunks (like Minecraft)
 const noiseScale = 0.1;
 const simplex = new SimplexNoise();
 
@@ -51,11 +52,35 @@ function generateChunk(cx, cz) {
     chunks[chunkKey] = blocks; // Save generated blocks in the chunk
 }
 
-// Only generate the chunk the player is in
-function generateChunksAroundPlayer() {
+// Function to generate chunks in the player's render distance
+function generateChunksInRenderDistance() {
     const playerChunkX = Math.floor(camera.position.x / (chunkSize * blockSize));
     const playerChunkZ = Math.floor(camera.position.z / (chunkSize * blockSize));
-    generateChunk(playerChunkX, playerChunkZ);
+
+    // Generate chunks within render distance
+    for (let x = -renderDistanceChunks; x <= renderDistanceChunks; x++) {
+        for (let z = -renderDistanceChunks; z <= renderDistanceChunks; z++) {
+            generateChunk(playerChunkX + x, playerChunkZ + z);
+        }
+    }
+}
+
+// Function to remove chunks outside of the render distance
+function removeDistantChunks() {
+    const playerChunkX = Math.floor(camera.position.x / (chunkSize * blockSize));
+    const playerChunkZ = Math.floor(camera.position.z / (chunkSize * blockSize));
+
+    for (let key in chunks) {
+        const [cx, cz] = key.split(',').map(Number);
+        const distX = Math.abs(cx - playerChunkX);
+        const distZ = Math.abs(cz - playerChunkZ);
+
+        // Remove chunks that are too far from the player
+        if (distX > renderDistanceChunks || distZ > renderDistanceChunks) {
+            chunks[key].forEach(block => scene.remove(block));
+            delete chunks[key];
+        }
+    }
 }
 
 // Position the camera
@@ -99,8 +124,9 @@ function updatePlayer() {
     camera.position.z += direction.z * -velocity.z;
     camera.position.y += velocity.y;
 
-    // Generate only the current chunk
-    generateChunksAroundPlayer();
+    // Generate new chunks within the render distance and remove distant chunks
+    generateChunksInRenderDistance();
+    removeDistantChunks();
 }
 
 // Window resize event
@@ -110,19 +136,6 @@ window.addEventListener('resize', () => {
     renderer.setSize(width, height);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
-});
-
-// Mouse lock for camera control
-document.body.addEventListener('click', () => {
-    document.body.requestPointerLock();
-});
-
-document.addEventListener('mousemove', (event) => {
-    if (document.pointerLockElement) {
-        camera.rotation.y -= event.movementX * 0.002;
-        camera.rotation.x -= event.movementY * 0.002;
-        camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x)); // Clamp vertical rotation
-    }
 });
 
 // Animation loop
