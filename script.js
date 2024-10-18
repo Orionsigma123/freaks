@@ -6,25 +6,37 @@ document.body.appendChild(renderer.domElement);
 
 renderer.setClearColor(0x87CEEB, 1); // Sky blue color
 
+// Textures
 const grassTexture = new THREE.TextureLoader().load('textures/grass.png');
 
-const chunkSize = 16; // Size of each chunk
-const renderDistanceChunks = 6; // Adjust render distance to prevent lag
+// Inventory
+const inventory = [];
+
+// Constants for Perlin noise and chunk generation
+let blockSize = 1;
+const chunkSize = 16; // Each chunk is 16x16 blocks
+const chunkRadius = 12; // Number of chunks to generate around the player
 const noiseScale = 0.1;
 const simplex = new SimplexNoise();
 
 let chunks = {}; // Store generated chunks
 
-// Function to generate a chunk
+// Function to create a block
+function createBlock(x, y, z, texture) {
+    const geometry = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
+    const material = new THREE.MeshBasicMaterial({ map: texture });
+    const block = new THREE.Mesh(geometry, material);
+    block.position.set(x * blockSize, y * blockSize, z * blockSize);
+    scene.add(block);
+    return block;
+}
+
+// Function to generate a chunk based on the chunk coordinates (cx, cz)
 function generateChunk(cx, cz) {
     const chunkKey = `${cx},${cz}`;
-    if (chunks[chunkKey]) return; // Skip if chunk already generated
+    if (chunks[chunkKey]) return; // Chunk already generated
 
-    const geometry = new THREE.BufferGeometry();
-    const vertices = [];
-    const faces = []; // Store indices for the faces
-    const uvs = []; // Store UVs for the texture
-
+    const blocks = [];
     for (let x = 0; x < chunkSize; x++) {
         for (let z = 0; z < chunkSize; z++) {
             const worldX = cx * chunkSize + x;
@@ -32,74 +44,41 @@ function generateChunk(cx, cz) {
             const height = Math.floor(simplex.noise2D(worldX * noiseScale, worldZ * noiseScale) * 5);
 
             for (let y = 0; y <= height; y++) {
-                const position = new THREE.Vector3(worldX, y, worldZ);
-
-                // Check if adjacent blocks exist to determine which faces to render
-                const neighbors = [
-                    { dx: 0, dy: 0, dz: -1 }, // Back
-                    { dx: 0, dy: 0, dz: 1 },  // Front
-                    { dx: -1, dy: 0, dz: 0 }, // Left
-                    { dx: 1, dy: 0, dz: 0 },  // Right
-                    { dx: 0, dy: -1, dz: 0 }, // Bottom
-                    { dx: 0, dy: 1, dz: 0 },  // Top
-                ];
-
-                // Define the vertices and faces for each visible side
-                neighbors.forEach((neighbor) => {
-                    const nx = worldX + neighbor.dx;
-                    const ny = y + neighbor.dy;
-                    const nz = worldZ + neighbor.dz;
-
-                    // Check if the neighboring position is empty (no block)
-                    const neighborKey = `${Math.floor(nx / chunkSize)},${Math.floor(nz / chunkSize)}`;
-                    const neighborHeight = chunks[neighborKey] ? Math.floor(simplex.noise2D(nx * noiseScale, nz * noiseScale) * 5) : -1;
-
-                    if (neighborHeight < ny) { // Render this face if there's no block
-                        const faceVertices = [
-                            position.x, position.y, position.z, // Bottom-left
-                            position.x + 1, position.y, position.z, // Bottom-right
-                            position.x + 1, position.y + 1, position.z, // Top-right
-                            position.x, position.y + 1, position.z, // Top-left
-                        ];
-
-                        const faceOffset = vertices.length / 3; // Current vertex count
-                        vertices.push(...faceVertices);
-                        faces.push(faceOffset, faceOffset + 1, faceOffset + 2, faceOffset, faceOffset + 2, faceOffset + 3); // Two triangles for each face
-
-                        // UV Mapping (assuming a single texture for all sides)
-                        const uvVertices = [
-                            0, 0,
-                            1, 0,
-                            1, 1,
-                            0, 1,
-                        ];
-                        uvs.push(...uvVertices);
-                    }
-                });
+                const block = createBlock(worldX, y, worldZ, grassTexture);
+                blocks.push(block); // Store block in this chunk
             }
         }
     }
-
-    // Set vertices, faces, and uvs to the geometry
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    geometry.setIndex(faces);
-    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-
-    const material = new THREE.MeshBasicMaterial({ map: grassTexture, side: THREE.DoubleSide });
-    const mesh = new THREE.Mesh(geometry, material);
-    scene.add(mesh);
-
-    chunks[chunkKey] = true; // Mark chunk as generated
+    chunks[chunkKey] = blocks; // Save generated blocks in the chunk
 }
 
-// Generate chunks around the player
+// Function to generate chunks around the player
 function generateChunksAroundPlayer() {
-    const playerChunkX = Math.floor(camera.position.x / chunkSize);
-    const playerChunkZ = Math.floor(camera.position.z / chunkSize);
+    const playerChunkX = Math.floor(camera.position.x / (chunkSize * blockSize));
+    const playerChunkZ = Math.floor(camera.position.z / (chunkSize * blockSize));
 
-    for (let x = -renderDistanceChunks; x <= renderDistanceChunks; x++) {
-        for (let z = -renderDistanceChunks; z <= renderDistanceChunks; z++) {
+    // Generate chunks in a radius around the player
+    for (let x = -chunkRadius; x <= chunkRadius; x++) {
+        for (let z = -chunkRadius; z <= chunkRadius; z++) {
             generateChunk(playerChunkX + x, playerChunkZ + z);
+        }
+    }
+}
+
+// Function to remove distant chunks
+function removeDistantChunks() {
+    const playerChunkX = Math.floor(camera.position.x / (chunkSize * blockSize));
+    const playerChunkZ = Math.floor(camera.position.z / (chunkSize * blockSize));
+
+    for (let key in chunks) {
+        const [cx, cz] = key.split(',').map(Number);
+        const distX = Math.abs(cx - playerChunkX);
+        const distZ = Math.abs(cz - playerChunkZ);
+
+        // Remove chunks that are too far from the player
+        if (distX > chunkRadius + 1 || distZ > chunkRadius + 1) {
+            chunks[key].forEach(block => scene.remove(block));
+            delete chunks[key];
         }
     }
 }
@@ -107,71 +86,64 @@ function generateChunksAroundPlayer() {
 // Position the camera
 camera.position.set(25, 0.4, 25);
 
-// Player controls
+// Player controls and movement logic
 const playerSpeed = 0.1;
+let velocity = new THREE.Vector3(0, 0, 0);
 let isJumping = false;
 const keys = {};
 
-window.addEventListener('keydown', (event) => {
-    keys[event.code] = true;
-});
-window.addEventListener('keyup', (event) => {
-    keys[event.code] = false;
-});
+// Handle key events
+window.addEventListener('keydown', (event) => keys[event.code] = true);
+window.addEventListener('keyup', (event) => keys[event.code] = false);
 
-// Function to handle player movement
 function updatePlayer() {
-    // Calculate the target height based on the ground height
-    const playerChunkX = Math.floor(camera.position.x / chunkSize);
-    const playerChunkZ = Math.floor(camera.position.z / chunkSize);
-    const groundHeight = Math.floor(simplex.noise2D(camera.position.x * noiseScale, camera.position.z * noiseScale) * 5);
+    velocity.set(0, 0, 0);
 
-    // Update camera's vertical position to stay on top of the ground
-    if (camera.position.y > groundHeight + 2) {
-        camera.position.y -= 0.1; // Simple gravity effect
-        isJumping = true;
-    } else {
-        camera.position.y = groundHeight + 2; // Ensure the camera stays at the correct height
-        isJumping = false; // Reset jumping when hitting the ground
-    }
-
-    // Handle horizontal movement
-    const direction = new THREE.Vector3();
-    camera.getWorldDirection(direction); // Get the direction the camera is facing
-    direction.y = 0; // Ignore vertical direction for horizontal movement
-    direction.normalize(); // Normalize direction to ensure consistent speed
-
-    if (keys['KeyW']) {
-        camera.position.x += direction.x * playerSpeed;
-        camera.position.z += direction.z * playerSpeed;
-    } 
-    if (keys['KeyS']) {
-        camera.position.x -= direction.x * playerSpeed;
-        camera.position.z -= direction.z * playerSpeed;
-    } 
-    if (keys['KeyA']) {
-        camera.position.x -= direction.z * playerSpeed; // Move left
-        camera.position.z += direction.x * playerSpeed; // Move left
-    } 
-    if (keys['KeyD']) {
-        camera.position.x += direction.z * playerSpeed; // Move right
-        camera.position.z -= direction.x * playerSpeed; // Move right
-    }
-
-    // Jumping logic
+    if (keys['KeyS']) velocity.z = playerSpeed; // Move backward
+    if (keys['KeyW']) velocity.z = -playerSpeed; // Move forward
+    if (keys['KeyA']) velocity.x = -playerSpeed; // Move left
+    if (keys['KeyD']) velocity.x = playerSpeed; // Move right
     if (keys['Space'] && !isJumping) {
-        camera.position.y += 0.5; // Simple jump effect
         isJumping = true;
+        velocity.y = 0.3; // Jump force
     }
+
+    if (camera.position.y > 2) velocity.y -= 0.1; // Apply gravity
+    else {
+        isJumping = false;
+        camera.position.y = 2;
+        velocity.y = 0;
+    }
+
+    const direction = new THREE.Vector3();
+    camera.getWorldDirection(direction);
+    direction.y = 0;
+    direction.normalize();
+
+    camera.position.x += direction.x * -velocity.z;
+    camera.position.z += direction.z * -velocity.z;
+    camera.position.y += velocity.y;
+
+    // Generate new chunks around the player and remove distant chunks
+    generateChunksAroundPlayer();
+    removeDistantChunks();
 }
+
+// Window resize event
+window.addEventListener('resize', () => {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    renderer.setSize(width, height);
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+});
 
 // Animation loop
 function animate() {
     requestAnimationFrame(animate);
-    generateChunksAroundPlayer(); // Generate chunks around the player
-    updatePlayer(); // Update player movement
+    updatePlayer();
     renderer.render(scene, camera);
 }
 
-// Start animation loop
+// Start the animation loop
 animate();
