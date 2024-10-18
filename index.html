@@ -32,6 +32,19 @@
             border-radius: 5px;
             font-family: Arial, sans-serif;
         }
+        #menu {
+            position: absolute;
+            top: 200px; /* Adjust position as needed */
+            left: 20px;
+            z-index: 100; /* Ensure it's on top */
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+        }
+        #message {
+            color: red; /* Message color */
+        }
     </style>
 </head>
 <body>
@@ -41,9 +54,16 @@
         <input type="range" id="renderDistance" min="1" max="32" value="16" step="1">
     </div>
 
+    <div id="menu">
+        <h3>World Menu</h3>
+        <input type="text" id="worldName" placeholder="Enter world name" />
+        <button id="saveWorldButton">Save World</button>
+        <button id="loadWorldButton">Load World</button>
+        <p id="message"></p>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
     <script src="script.js"></script>
 </body>
-</html>)
-
+</html>
